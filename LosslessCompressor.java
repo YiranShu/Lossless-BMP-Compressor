@@ -4,8 +4,8 @@ import java.io.*;
 import java.util.*;
 
 public class LosslessCompressor extends JFrame {
-    private int height;
-    private int width;
+    private int height; //the height of the image
+    private int width; //the width of the image
     private int[][] red; //red[i][j] is the value of red channel of the pixel[i][j]
     private int[][] green; //green[i][j] is the value of green channel of the pixel[i][j]
     private int[][] blue; //blue[i][j] is the value of blue channel of the pixel[i][j]
@@ -22,7 +22,7 @@ public class LosslessCompressor extends JFrame {
     public void readBMP(File file) throws IOException {
         FileInputStream fis = new FileInputStream(file);
         BufferedInputStream bis = new BufferedInputStream(fis);
-        boolean reversed;
+        boolean reversed; //whether the image is stored reversely
         long emptyBytes; //the last bytes of a row may be meaningless
         header = new byte[54];
 
@@ -53,7 +53,7 @@ public class LosslessCompressor extends JFrame {
                     bis.skip(emptyBytes);
                 }
             }
-        } else {
+        } else { //if the image is not reversed, read from top to bottom
             for (int i = 0; i < height; i++) {
                 for (int j = 0; j < width; j++) {
                     blue[i][j] = bis.read();
@@ -70,32 +70,16 @@ public class LosslessCompressor extends JFrame {
         bis.close();
     }
 
-    public void compress(File file) throws IOException {
-        FileOutputStream fos = new FileOutputStream(file);
-        BufferedOutputStream bos = new BufferedOutputStream(fos);
-
-        bos.write(header);
-        bos.flush();
-
-        encodeColor(bos, red);
-        encodeColor(bos, green);
-        encodeColor(bos, blue);
-
-        bos.flush();
-        fos.close();
-        bos.close();
-    }
-
-    public void encodeColor(BufferedOutputStream bos, int[][] color) throws IOException {
+    private boolean canEncodeWithTwoBytes(int[][] color) {
         HashMap<HashableArray, Integer> dic = new HashMap<>();
         int code = 0;
-        for (int i = 0; i <= 255; i++) {
+        for (int i = 0; i <= 255; i++) { //initialize the dictionary
             dic.put(new HashableArray(i), code++);
         }
 
         HashableArray array = new HashableArray(color[0][0]);
 
-        for (int i = 0; i < color.length; i++) {
+        for (int i = 0; i < color.length; i++) { //LZW Algorithm. Try to encode a symbol with 2 bytes
             for (int j = 0; j < color[0].length; j++) {
                 if (i == 0 && j == 0) {
                     continue;
@@ -107,33 +91,95 @@ public class LosslessCompressor extends JFrame {
                 if (dic.containsKey(temp)) {
                     array.add(c);
                 } else {
-                    bos.write((dic.get(array) >> 16) & 0xFF);
-                    bos.write((dic.get(array) >> 8) & 0xFF);
-                    bos.write(dic.get(array) & 0xFF);
-
                     dic.put(temp, code++);
-                    if (code == (1 << 24) - 1) {
-                        System.out.println("Warning: code length deficient!");
+                    if (code == (1 << 16) - 1) { // 2 bytes are deficient to encode a symbol
+                        return false;
                     }
                     array = new HashableArray(c);
                 }
             }
         }
 
-        bos.write((dic.get(array) >> 16) & 0xFF);
-        bos.write((dic.get(array) >> 8) & 0xFF);
-        bos.write(dic.get(array) & 0xFF);
-        System.out.println("Code: " + (code - Integer.MIN_VALUE));
+        return true;
     }
 
-    public void showBMP(String title) {
+    public void encodeColor(BufferedOutputStream bos, int[][] color) throws IOException {
+        HashMap<HashableArray, Integer> dic = new HashMap<>();
+        int code = 0;
+        for (int i = 0; i <= 255; i++) { //initialize the dictionary for LZW algorithm
+            dic.put(new HashableArray(i), code++);
+        }
+
+        HashableArray array = new HashableArray(color[0][0]);
+
+        for (int i = 0; i < color.length; i++) { //encode using LZW algorithm
+            for (int j = 0; j < color[0].length; j++) {
+                if (i == 0 && j == 0) {
+                    continue;
+                }
+
+                int c = color[i][j];
+                HashableArray temp = array.append(c);
+
+                if (dic.containsKey(temp)) {
+                    array.add(c);
+                } else {
+                    if(codeLength == 3) {
+                        //if we use 3 bytes to encode a symbol, we will store the 17th bits through the 24th bit
+                        //otherwise, we only need to store the 1st bit though the 16th bit
+                        bos.write((dic.get(array) >> 16) & 0xFF);
+                    }
+                    bos.write((dic.get(array) >> 8) & 0xFF);
+                    bos.write(dic.get(array) & 0xFF);
+
+                    dic.put(temp, code++);
+                    array = new HashableArray(c);
+                }
+            }
+        }
+
+        if(codeLength == 3) {
+            //if we use 3 bytes to encode a symbol, we will store the 17th bits through the 24th bit
+            //otherwise, we only need to store the 1st bit though the 16th bit
+            bos.write((dic.get(array) >> 16) & 0xFF);
+        }
+        bos.write((dic.get(array) >> 8) & 0xFF);
+        bos.write(dic.get(array) & 0xFF);
+    }
+
+    public void compress(File file) throws IOException {
+        FileOutputStream fos = new FileOutputStream(file);
+        BufferedOutputStream bos = new BufferedOutputStream(fos);
+
+        bos.write(header);
+        bos.flush();
+
+        if(canEncodeWithTwoBytes(red) && canEncodeWithTwoBytes(green) && canEncodeWithTwoBytes(blue)) {
+            // if every channel can be encoded with 2 bytes per symbol, then use 2 bytes per symbol
+            codeLength = 2;
+        } else {
+            // otherwise, use 3 bytes per symbol
+            codeLength = 3;
+        }
+
+        bos.write(codeLength);
+        encodeColor(bos, red); //encode the red channel of the image
+        encodeColor(bos, green); //encode the green channel of the image
+        encodeColor(bos, blue); //encode the blue channel of the image
+
+        bos.flush();
+        fos.close();
+        bos.close();
+    }
+
+    public void showBMP(String title, int x, int y) {
         this.setTitle(title);
         this.setSize(width, height);
         this.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        this.setLocationRelativeTo(null);
 
         this.setResizable(true);
         this.setVisible(true);
+        this.setLocation(x, y);
 
         DrawPanel drawPanel = new DrawPanel();
 
@@ -143,7 +189,7 @@ public class LosslessCompressor extends JFrame {
     public class DrawPanel extends JPanel {
         public void paint(Graphics g) {
             super.paint(g);
-            for (int i = 0; i < height; i++) {
+            for (int i = 0; i < height; i++) { // paint every pixel
                 for (int j = 0; j < width; j++) {
                     g.setColor(new Color(red[i][j], green[i][j], blue[i][j]));
                     g.fillRect(j, i, 1, 1);
@@ -157,15 +203,15 @@ public class LosslessCompressor extends JFrame {
             FileSelector fs = new FileSelector();
             String path = fs.getPath();
             if (path != null && path.endsWith(".bmp")) {
+                //the name of the compressed IN3 file
                 String compressedPath = path.substring(0, path.length() - 3) + "IN3";
-
                 File originalFile = new File(path);
                 File compressedFile = new File(compressedPath);
 
                 LosslessCompressor lc = new LosslessCompressor();
                 lc.readBMP(originalFile);
-                lc.showBMP("Original");
-                lc.compress(compressedFile);
+                lc.showBMP("Original", 100, 300); //show the original file
+                lc.compress(compressedFile); //make the compressed IN3 file.
 
                 long originalSize = originalFile.length();
                 long compressedSize = compressedFile.length();
@@ -174,18 +220,21 @@ public class LosslessCompressor extends JFrame {
                 System.out.println("Compressed file size: " + compressedSize);
                 System.out.println("Compression ratio: " + originalSize * 1.0 / compressedSize);
 
+                //the name of the decompressed file
                 String decompressedPath = path.substring(0, path.length() - 4) + "_lossless_decompressed.bmp";
                 File decompressedFile = new File(decompressedPath);
                 INFileReader fileReader = new INFileReader();
                 fileReader.readIN(compressedFile);
-                fileReader.decompress(decompressedFile);
+                fileReader.decompress(decompressedFile); //decompress the IN3 file
 
-                lc.readBMP(decompressedFile);
-                lc.showBMP("Compressed");
-            } else if(path != null && path.endsWith(".IN3")) {
+                LosslessCompressor displayer = new LosslessCompressor();
+                displayer.readBMP(decompressedFile);
+                displayer.showBMP("Compressed", 1000, 300); //show the decompressed file
+            } else if(path != null && path.endsWith(".IN3")) { //if the input file is IN3 file, decompress and display
                 File compressedFile = new File(path);
                 LosslessCompressor lc = new LosslessCompressor();
 
+                //the name of the decompressed file
                 String decompressedPath = path.substring(0, path.length() - 4) + "_lossless_decompressed.bmp";
                 File decompressedFile = new File(decompressedPath);
                 INFileReader fileReader = new INFileReader();
@@ -193,7 +242,7 @@ public class LosslessCompressor extends JFrame {
                 fileReader.decompress(decompressedFile);
 
                 lc.readBMP(decompressedFile);
-                lc.showBMP("Compressed");
+                lc.showBMP("Compressed", 100, 300); //show the image of the input IN3 file
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -202,11 +251,11 @@ public class LosslessCompressor extends JFrame {
 }
 
 class INFileReader {
-    private int height;
-    private int width;
+    private int height; //the height of the image
+    private int width; //the width of the image
     private int[][] red; //red[i][j] is the value of red channel of the pixel[i][j]
-    private int[][] green;
-    private int[][] blue;
+    private int[][] green; //green[i][j] is the value of green channel of the pixel[i][j]
+    private int[][] blue; //blue[i][j] is the value of blue channel of the pixel[i][j]
     private ArrayList<Integer> codeSequence = new ArrayList<>();
     private byte[] header;
     private boolean reversed; //whether the image is bottom-up
@@ -219,10 +268,27 @@ class INFileReader {
                 ((int) bytes[offset - 3] & 0xff);
     }
 
+    private void readBuffer(ArrayList<Integer> buffer, int n) {
+        // read the buffer to produce the sequence of code. Every n bytes form a symbol.
+        // n is either 2 or 3
+        if(n == 2) {
+            for (int i = 0; i + n - 1 < buffer.size(); i += n) {
+                int code = ((buffer.get(i) & 0xFF) << 8) | (buffer.get(i + 1) & 0xFF);
+                codeSequence.add(code);
+            }
+        } else {
+            for (int i = 0; i + n - 1 < buffer.size(); i += n) {
+                int code = ((buffer.get(i) & 0xFF) << 16) | ((buffer.get(i + 1) & 0xFF) << 8) | (buffer.get(i + 2) & 0xFF);
+                codeSequence.add(code);
+            }
+        }
+    }
+
     public void readIN(File file) throws IOException {
         FileInputStream fis = new FileInputStream(file);
         BufferedInputStream bis = new BufferedInputStream(fis);
         header = new byte[54];
+        int codeLength; //# of bytes than encode a symbol
 
         bis.read(header, 0, 54); //The first 54 bytes are header
         width = bytesToInt(header, 21); //get the width of the image
@@ -241,18 +307,15 @@ class INFileReader {
             emptyBytes = 0;
         }
 
+        codeLength = bis.read(); //read the # of bytes that encode a symbol
+
         ArrayList<Integer> buffer = new ArrayList<>();
         int temp;
-        while((temp = bis.read()) != -1) {
+        while((temp = bis.read()) != -1) { // read all data into buffer
             buffer.add(temp);
         }
 
-        for(int i = 0; i + 2 < buffer.size(); i += 3) {
-            int code = ((buffer.get(i) & 0xFF) << 16) | ((buffer.get(i + 1) & 0xFF) << 8) | (buffer.get(i + 2) & 0xFF);
-            codeSequence.add(code);
-        }
-
-        System.out.println("length: " + codeSequence.size());
+        readBuffer(buffer, codeLength); //read the buffer
 
         fis.close();
         bis.close();
@@ -271,7 +334,8 @@ class INFileReader {
 
         currentCode = codeSequence.get(start);
         color[row][column++] = dic.get(currentCode).getArray().get(0);
-        for(int i = start + 1; i < codeSequence.size(); i++) {
+        for(int i = start + 1; i < codeSequence.size(); i++) { //LZW decoder algorithm.
+            // The detail of the decoder algorithm can be found in my report
             previousCode = currentCode;
             currentCode = codeSequence.get(i);
 
@@ -279,10 +343,10 @@ class INFileReader {
                 ArrayList<Integer> tempArray = dic.get(currentCode).getArray();
                 for(int item: tempArray) {
                     color[row][column++] = item;
-                    if(column == width) {
+                    if(column == width) { //if a row ends, decode the next row
                         row++;
                         column = 0;
-                        if(row == height) {
+                        if(row == height) { //the whole image is decoded
                             return i + 1;
                         }
                     }
@@ -298,10 +362,10 @@ class INFileReader {
                 ArrayList<Integer> tempArray = previousArray.append(current).getArray();
                 for(int item: tempArray) {
                     color[row][column++] = item;
-                    if(column == width) {
+                    if(column == width) { //if a row ends, decode the next row
                         row++;
                         column = 0;
-                        if(row == height) {
+                        if(row == height) { //the whole image is decoded
                             return i + 1;
                         }
                     }
@@ -322,11 +386,11 @@ class INFileReader {
             skip = new byte[emptyBytes];
         }
 
-        int greenStart = decodeColor(red, 0);
-        int blueStart = decodeColor(green, greenStart);
-        int end = decodeColor(blue, blueStart);
+        int greenStart = decodeColor(red, 0); // decode red channel
+        int blueStart = decodeColor(green, greenStart); // decode green channel
+        int end = decodeColor(blue, blueStart); // decode blue channel
 
-        if(reversed) {
+        if(reversed) { // if the image is stored reversely
             for(int i = height - 1; i >= 0; i--) {
                 for(int j = 0; j < width; j++) {
                     bos.write(blue[i][j]);
@@ -335,7 +399,7 @@ class INFileReader {
                 }
 
                 if(skip != null) {
-                    bos.write(skip);
+                    bos.write(skip); //skip the few bytes at the end of a row
                 }
             }
         } else {
@@ -347,7 +411,7 @@ class INFileReader {
                 }
 
                 if(skip != null) {
-                    bos.write(skip);
+                    bos.write(skip); //skip the few bytes at the end of a row
                 }
             }
         }
