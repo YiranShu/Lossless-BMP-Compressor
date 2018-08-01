@@ -88,7 +88,7 @@ public class LosslessCompressor extends JFrame {
 
     public void encodeColor(BufferedOutputStream bos, int[][] color) throws IOException {
         HashMap<HashableArray, Integer> dic = new HashMap<>();
-        int code = Integer.MIN_VALUE;
+        int code = 0;
         for (int i = 0; i <= 255; i++) {
             dic.put(new HashableArray(i), code++);
         }
@@ -107,13 +107,12 @@ public class LosslessCompressor extends JFrame {
                 if (dic.containsKey(temp)) {
                     array.add(c);
                 } else {
-                    bos.write((dic.get(array) >> 24) & 0xFF);
                     bos.write((dic.get(array) >> 16) & 0xFF);
                     bos.write((dic.get(array) >> 8) & 0xFF);
                     bos.write(dic.get(array) & 0xFF);
 
                     dic.put(temp, code++);
-                    if (code == Integer.MAX_VALUE) {
+                    if (code == (1 << 24) - 1) {
                         System.out.println("Warning: code length deficient!");
                     }
                     array = new HashableArray(c);
@@ -121,7 +120,6 @@ public class LosslessCompressor extends JFrame {
             }
         }
 
-        bos.write((dic.get(array) >> 24) & 0xFF);
         bos.write((dic.get(array) >> 16) & 0xFF);
         bos.write((dic.get(array) >> 8) & 0xFF);
         bos.write(dic.get(array) & 0xFF);
@@ -249,9 +247,8 @@ class INFileReader {
             buffer.add(temp);
         }
 
-        for(int i = 0; i + 3 < buffer.size(); i += 4) {
-            int code = ((buffer.get(i) & 0xFF) << 24) | ((buffer.get(i + 1) & 0xFF) << 16)
-                    | ((buffer.get(i + 2) & 0xFF) << 8) | (buffer.get(i + 3) & 0xFF);
+        for(int i = 0; i + 2 < buffer.size(); i += 3) {
+            int code = ((buffer.get(i) & 0xFF) << 16) | ((buffer.get(i + 1) & 0xFF) << 8) | (buffer.get(i + 2) & 0xFF);
             codeSequence.add(code);
         }
 
@@ -263,7 +260,7 @@ class INFileReader {
 
     private int decodeColor(int[][] color, int start) {
         HashMap<Integer, HashableArray> dic = new HashMap<>();
-        int code = Integer.MIN_VALUE;
+        int code = 0;
         for(int i = 0; i <= 255; i++) {
             dic.put(code++, new HashableArray(i));
         }
@@ -272,8 +269,6 @@ class INFileReader {
         int column = 0;
         int currentCode, previousCode;
 
-        int in = 0, out = 0;
-
         currentCode = codeSequence.get(start);
         color[row][column++] = dic.get(currentCode).getArray().get(0);
         for(int i = start + 1; i < codeSequence.size(); i++) {
@@ -281,7 +276,6 @@ class INFileReader {
             currentCode = codeSequence.get(i);
 
             if(dic.containsKey(currentCode)) {
-                in++;
                 ArrayList<Integer> tempArray = dic.get(currentCode).getArray();
                 for(int item: tempArray) {
                     color[row][column++] = item;
@@ -297,7 +291,6 @@ class INFileReader {
                 int current = dic.get(currentCode).getArray().get(0);
                 dic.put(code++, previousArray.append(current));
             } else {
-                out++;
                 HashableArray previousArray = dic.get(previousCode);
                 int current = dic.get(previousCode).getArray().get(0);
                 dic.put(code++, previousArray.append(current));
