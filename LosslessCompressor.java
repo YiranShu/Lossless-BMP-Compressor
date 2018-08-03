@@ -211,7 +211,9 @@ public class LosslessCompressor extends JFrame {
                 LosslessCompressor lc = new LosslessCompressor();
                 lc.readBMP(originalFile);
                 lc.showBMP("Original", 100, 300); //show the original file
+                long startTime = System.currentTimeMillis();
                 lc.compress(compressedFile); //make the compressed IN3 file.
+                long endTime = System.currentTimeMillis();
 
                 long originalSize = originalFile.length();
                 long compressedSize = compressedFile.length();
@@ -219,6 +221,7 @@ public class LosslessCompressor extends JFrame {
                 System.out.println("Original file size: " + originalSize);
                 System.out.println("Compressed file size: " + compressedSize);
                 System.out.println("Compression ratio: " + originalSize * 1.0 / compressedSize);
+                System.out.println("Running time: " + (float)(endTime - startTime) / 1000 + "s");
 
                 //the name of the decompressed file
                 String decompressedPath = path.substring(0, path.length() - 4) + "_lossless_decompressed.bmp";
